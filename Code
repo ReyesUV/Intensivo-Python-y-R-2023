@@ -1,0 +1,191 @@
+## Importar las librerías necesarias
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+from sklearn.metrics import mean_squared_error
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+import random
+from sklearn.decomposition import PCA
+import seaborn as sns
+
+
+## Obtener los datos a analizar
+df = pd.read_csv('countriestable.csv')
+df.head()
+
+## Análisis descriptivo
+## Países con mayor número de habitantes
+top = df.nlargest(10, 'pop2023')
+top
+## Gráfico de los países con mayor número de habitantes
+top.plot(kind = 'bar', x = 'country', y = 'pop2023', label = 'Población' ,color = 'lightblue', width = 0.6)
+plt.xlabel('País')
+plt.ylabel('Población (Miles de Millones)')
+plt.title('Países más poblados en 2023')
+plt.show()
+
+## Países más grandes
+areatop = df.nlargest(10, 'area')
+## Establecer el orden de menor a mayor
+areatop = areatop.sort_values(by = 'area', ascending = True)
+areatop
+## Gráfico de los países más grandes
+areatop.plot(kind = 'barh', x = 'country', y = 'area', color = 'skyblue', label = 'Área', width = 0.5)
+plt.xlabel('Extensión (Decenas de Milones de KM cuadrados)')
+plt.ylabel('País')
+plt.title('Naciones con mayor extensión territorial')
+plt.show()
+
+## Países con mayor densidad poblacional
+dens = df.nlargest(10, 'density')
+#dens = dens.sort_values(by = 'density', ascending = True)
+dens
+## Gráfico
+ordered = dens.sort_values(by= 'density')
+m_range = range(1,len(dens.index)+1)
+plt.hlines(y=m_range, xmin=0, xmax=ordered['density'], color='orange')
+plt.plot(ordered['density'], m_range, "o")
+
+## Agregar etiquetas
+plt.yticks(m_range, ordered['country'])
+plt.title('Países con la mayor densidad poblacional')
+plt.xlabel('Densidad')
+plt.ylabel('País Poblacional')
+plt.show()
+
+##### AJUSTE DE UN MODELO DE REGRESIÓN LINEAL SIMPLE
+## Relación entre el cambio neto y la tasa de crecimiento
+x = df['netChange']
+y = df['growthRate']
+plt.scatter(x,y)
+plt.xlabel('Cambio Neto Poblacional')
+plt.ylabel('Tasa de Crecimiento Poblacional')
+
+## Limpieza de la base, se encontraron valores faltantes
+## Sustituir valores faltantes por la media de dichos valores
+x = x.fillna(x.mean())
+y = y.fillna(y.mean())
+print(x)
+
+## Dividir los datos en muestra de entrenamiento y de prueba
+x_train, x_test, y_train, y_test = train_test_split(
+                                            x.values.reshape(-1,1),
+                                            y.values.reshape(-1,1),
+                                            train_size = 0.8,
+                                            random_state = 123,
+                                            shuffle = True
+                                           )
+## Ajuste del modelo de regresión
+x_train = sm.add_constant(x_train, prepend = True)
+modelo = sm.OLS(endog = y_train, exog = x_train,)
+modelo = modelo.fit()
+print(modelo.summary())
+
+## Obtención de los Intervalos de confianza
+modelo.conf_int(alpha = 0.05)
+
+## Llevar a cabo las predicciones
+pred = modelo.predict(x_train)
+pred
+
+## Predicciones con intervalos de confianza del 95%
+predicciones = modelo.get_prediction(exog = x_train).summary_frame(alpha = 0.05)
+predicciones.head(5)
+
+## Gráfico del modelo
+predicciones = modelo.get_prediction(exog = x_train).summary_frame(alpha = 0.05)
+predicciones['x'] = x_train[:,1]
+predicciones['y'] = y_train
+predicciones = predicciones.sort_values('x')
+
+fig, ax = plt.subplots(figsize= (6, 3.84))
+ax.scatter(predicciones['x'], predicciones['y'], marker = 'o',color = 'gray')
+ax.plot(predicciones['x'],predicciones['mean'], linestyle = '-', label = 'OLS')
+ax.plot(predicciones['x'], predicciones["mean_ci_lower"], linestyle='--', color='red', label="95% CI")
+ax.plot(predicciones['x'], predicciones["mean_ci_upper"], linestyle='--', color='red')
+ax.fill_between(predicciones['x'], predicciones["mean_ci_lower"], predicciones["mean_ci_upper"], alpha=0.1)
+ax.legend();
+
+## El cambio neto poblacional no tiene relación con la tasa de crecimiento
+
+
+########### ANÁLISIS CLUSTER
+## Tomar en cuenta sólo las variables de interés para hacer las agrupaciones
+datos = df.loc[:,['country','area','netChange','growthRate','worldPercentage','density','pop2023']]
+datos.head()
+
+## Borrar la variable que contiene el nombre del país
+datos = datos.drop(['country'], axis = 1) 
+datos.head()
+
+## Estandarizar las variables
+escalador = MinMaxScaler().fit(datos.values)
+dataesc = pd.DataFrame(escalador.transform(datos.values))
+dataesc.head()
+
+## Mostrar si la data tiene NA's
+print('Datos nulos en el DataFrame')
+print(dataesc.isnull())
+
+## Sustituir los valores faltantes con la media de cada variable
+col_m = dataesc.mean()
+dataesc = dataesc.fillna(col_m)
+dataesc.isnull()
+
+## Determinar el número óptimo de clusters con el método del codo
+## Método del codo
+inercias = []
+for k in range(2, 10):
+    kmeans = KMeans(n_clusters = k).fit(dataesc.values)
+    inercias.append(kmeans.inertia_)
+    
+plt.figure(figsize = (6,5), dpi = 100)
+plt.scatter(range(2,10), inercias, marker = 'o', s = 180, color = 'orange')
+plt.xlabel('Número de Clusters Óptimos', fontsize = 20)
+plt.ylabel('Inercia', fontsize = 20)
+plt.show()
+
+## Aplicar el algoritmo K-Means
+import random
+
+clustering = KMeans(n_clusters = 5, max_iter = 300, random_state = 123)
+clustering.fit(dataesc)
+
+## Agregar la clasificación a los datos
+datos['Clusters'] = clustering.labels_
+datos.head()
+
+pca = PCA(n_components = 2)
+pca_data = pca.fit_transform(dataesc)
+pca_data_df = pd.DataFrame(data = pca_data, columns = ['Componente_1','Componente_2'])
+pca_nombres_data = pd.concat([pca_data_df, datos[['Clusters']]], axis = 1)
+pca_nombres_data
+
+## Graficar los clusters con los PC
+fig = plt.figure(figsize = (7,6))
+ax = fig.add_subplot(1,1,1)
+ax.set_xlabel('Componente_1', fontsize = 15)
+ax.set_ylabel('Componente_2', fontsize = 15)
+ax.set_title('Componentes Principales', fontsize = 20)
+
+color_theme = np.array(['green', 'blue','orange','red','purple'])
+ax.scatter(x = pca_nombres_data.Componente_1, y = pca_nombres_data.Componente_2,
+           c = color_theme[pca_nombres_data.Clusters], s = 40)
+
+plt.show()
+
+
+#plt.figure(figsize = (12,6))
+#sns.scatterplot(data = pca_nombres_data, x = 'Componente_1', y = 'Componente_2', hue = 'Clusters')
+color_theme = np.array(['green', 'blue','orange','red','purple'])
+sns.scatterplot(data = pca_nombres_data, x = 'Componente_1', y = 'Componente_2', hue = 'Clusters')
+
+## Agregar la variable Cluster a la data original
+df['Cluster'] = clustering.labels_
+df.head()
+
